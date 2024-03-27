@@ -1,0 +1,40 @@
+cluster:
+  mkdir -p logs/{rule} &&
+  sbatch
+    --clusters={resources.cluster}
+    -n {threads}
+    --mem-per-cpu={resources.mem_mb_per_cpu}
+    --partition={resources.partition}
+    --job-name=smk-{rule}-{wildcards}
+    --output=logs/{rule}/{rule}-{wildcards}-%j.out
+    -A lp_jm_virome_group
+    -t {resources.runtime}
+    -N 1
+    --parsable
+    # $(./scripts/parseJobID.sh {dependencies})
+default-resources:
+  - cluster=genius
+  - mem_mb_per_cpu=3400
+  - runtime=60
+  - partition=batch
+set-resources:
+  - ska_fastq:mem_mb_per_cpu=28000
+  - ska_distance:mem_mb_per_cpu=150000
+  - ska_distance:runtime=1440
+  - ska_distance:partition=batch
+restart-times: 3
+max-jobs-per-second: 10
+max-status-checks-per-second: 1
+local-cores: 1
+latency-wait: 30
+jobs: 100
+keep-going: True
+rerun-incomplete: True
+printshellcmds: True
+scheduler: greedy
+use-conda: True
+jobscript: scripts/jobscript_template.sh
+cluster-cancel: 'scancel'
+immediate-submit: False
+notemp: False
+

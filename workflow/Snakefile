@@ -1,0 +1,133 @@
+# Main entrypoint of the workflow.
+# Please follow the best practices:
+# https://snakemake.readthedocs.io/en/stable/snakefiles/best_practices.html,
+# in particular regarding the standardized folder structure mentioned there.
+import os
+import pandas as pd
+import itertools
+import math
+import numpy as np
+
+
+configfile: "config/config.yaml"
+
+
+include: "rules/common.smk"
+
+
+rule all:
+    input:
+        "results/ska.distances.tsv",
+
+
+rule map_reads:
+    input:
+        read1=lambda wildcards: samples.loc[wildcards.sample, "fq1"],
+        read2=lambda wildcards: samples.loc[wildcards.sample, "fq2"],
+    output:
+        temp("results/mapped_reads/{sample}.sam"),
+    params:
+        ref=config["genome"],
+    threads: config["threads"]
+    group:
+        "group0"
+    log:
+        "logs/bowtie/{sample}.log",
+    conda:
+        "envs/bowtie.yaml"
+    shell:
+        "(bowtie2 --sensitive -p {threads} -x {params.ref} -1 {input.read1} -2 {input.read2} -S {output}) > {log}"
+
+
+rule samtools_sort:
+    input:
+        "results/mapped_reads/{sample}.sam",
+    output:
+        protected("results/sorted_bam/{sample}.sorted.bam"),
+    threads: config["threads"]
+    group:
+        "group0"
+    log:
+        "logs/samtools_sort/{sample}.log",
+    conda:
+        "envs/samtools.yaml"
+    shell:
+        """
+        (samtools view -bS {input} |
+        samtools view -b -F12 - |
+        samtools sort -n - -o {output} -@ {threads}) > {log}
+        """
+
+
+rule output_fastq:
+    input:
+        "results/sorted_bam/{sample}.sorted.bam",
+    output:
+        read1="results/mapped_reads/{sample}.mapped.R1.fastq.gz",
+        read2="results/mapped_reads/{sample}.mapped.R2.fastq.gz",
+    params:
+        read1="results/mapped_reads/{sample}.mapped.R1.fastq",
+        read2="results/mapped_reads/{sample}.mapped.R2.fastq",
+    threads: config["threads"]
+    group:
+        "group0"
+    log:
+        "logs/output_fastq/{sample}.log",
+    conda:
+        "envs/samtools.yaml"
+    shell:
+        """
+        (samtools fastq  -1 {params.read1} -2 {params.read2} {input} -@ {threads}
+        pigz -9 {params.read1}
+        pigz -9 {params.read2}) > {log}
+        """
+
+
+rule ska_fastq:
+    input:
+        read1="results/mapped_reads/{sample}.mapped.R1.fastq.gz",
+        read2="results/mapped_reads/{sample}.mapped.R2.fastq.gz",
+    output:
+        "results/skf_files/{sample}.skf",
+    params:
+        name="{sample}",
+    threads: 1
+    log:
+        "logs/ska_fastq/{sample}.log",
+    conda:
+        "envs/ska.yaml"
+    shell:
+        "(ska fastq -o results/skf_files/{params.name} {input.read1} {input.read2}) > {log}"
+
+
+rule ska_distance:
+    input:
+        lambda wildcards: input_df.loc[wildcards.iteration, "sample_list"],
+    output:
+        "results/distances/{iteration}.distances.tsv",
+    params:
+        name="{iteration}",
+    threads: 1
+    log:
+        "logs/ska_distance/{iteration}.log",
+    conda:
+        "envs/ska.yaml"
+    shell:
+        """
+        (ska distance -c -o results/distances/{params.name} {input}) > {log}
+        rm results/distances/{params.name}.dot
+        """
+
+
+rule cat_distance_files:
+    input:
+        distance_files,
+    output:
+        "results/ska.distances.tsv",
+    log:
+        "logs/ska_distance/cat_distance_files.log",
+    conda:
+        "envs/samtools.yaml"
+    shell:
+        #"cat {input} > {output}" #better cat, print header and remove from all files
+        "(awk 'NR < 2 {{print $0 ; next}} !/^Sample 1/{{print $0}}' {input} > {output}) > {log}"

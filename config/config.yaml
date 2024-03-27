@@ -1,0 +1,7 @@
+samples:
+  "samples.tsv"
+
+genome:
+  "path/to/genome"
+
+threads: 36
